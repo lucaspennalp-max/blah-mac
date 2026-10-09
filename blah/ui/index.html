@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blah</title>
+<style>
+:root {
+  --bg: #F4F5F2;
+  --surface: #FFFFFF;
+  --ink: #1B1E22;
+  --muted: #697078;
+  --faint: #9AA0A6;
+  --line: #E1E3DE;
+  --accent: #3346F0;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(51, 70, 240, 0.09);
+  --danger: #C2362B;
+  --ok: #1E8E4E;
+  --key-top: #FFFFFF;
+  --key-side: #D5D8D1;
+  --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --text: -apple-system, system-ui, "Helvetica Neue", sans-serif;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181B;
+    --surface: #1F2226;
+    --ink: #ECEEF0;
+    --muted: #9BA1A8;
+    --faint: #6C727A;
+    --line: #2C3036;
+    --accent: #8994FF;
+    --accent-ink: #12142A;
+    --accent-soft: rgba(137, 148, 255, 0.12);
+    --danger: #FF7B70;
+    --ok: #5BD08F;
+    --key-top: #2A2E33;
+    --key-side: #0E1012;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 var(--text);
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+.shell { display: grid; grid-template-columns: 196px 1fr; height: 100vh; }
+
+/* ---------------------------------------------------------------- sidebar */
+.sidebar {
+  display: flex; flex-direction: column;
+  padding: 6px 14px 16px;
+  border-right: 1px solid var(--line);
+}
+.wordmark {
+  display: flex; align-items: center; gap: 10px;
+  font: 800 28px/1 var(--rounded);
+  letter-spacing: -0.03em;
+  margin: 4px 4px 24px;
+}
+.wordmark img { width: 46px; height: 46px; flex: none; margin: -4px; }
+.wordmark span { color: var(--accent); }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav button {
+  display: flex; align-items: center; gap: 10px;
+  text-align: left; border: 0; background: none;
+  padding: 7px 10px; border-radius: 8px;
+  font-weight: 500; color: var(--muted);
+}
+.nav button:hover { color: var(--ink); background: var(--accent-soft); }
+.nav button[aria-current="page"] { color: var(--ink); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.nav svg { width: 16px; height: 16px; flex: none; }
+.engine { margin-top: auto; padding: 0 10px; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; transform: translateY(-1px); }
+.dot.ok { background: var(--ok); }
+.dot.busy { background: var(--accent); }
+.dot.bad { background: var(--danger); }
+
+/* ---------------------------------------------------------------- main */
+main { overflow-y: auto; }
+.page { max-width: 760px; margin: 0 auto; padding: 18px 40px 64px; }
+.page[hidden] { display: none; }
+h1 { font: 700 26px/1.2 var(--rounded); letter-spacing: -0.02em; margin: 0 0 6px; }
+h2 { font: 650 15px/1.3 var(--text); margin: 0 0 12px; }
+.lede { color: var(--muted); margin: 0 0 28px; max-width: 56ch; }
+
+/* hero: the hotkey as a real key */
+.hero { display: flex; align-items: center; gap: 26px; padding: 22px 0 30px; }
+.keycap {
+  flex: none; width: 92px; height: 92px; border-radius: 20px;
+  background: var(--key-top);
+  box-shadow: 0 1px 0 1px var(--line) inset, 0 6px 0 var(--key-side), 0 8px 18px rgba(0,0,0,.08);
+  display: grid; place-items: center; position: relative;
+  transform: translateY(-3px);
+  transition: transform .08s ease, box-shadow .08s ease;
+}
+.keycap.down { transform: translateY(2px); box-shadow: 0 1px 0 1px var(--line) inset, 0 1px 0 var(--key-side), 0 2px 6px rgba(0,0,0,.08); }
+.keycap .glyph { font: 500 38px/1 var(--rounded); }
+.keycap .side { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; font-size: 11px; color: var(--muted); }
+.keycap.live::after {
+  content: ""; position: absolute; top: 10px; right: 10px; width: 9px; height: 9px; border-radius: 50%;
+  background: #FF5A4E;
+}
+.hero h1 { font-size: 30px; margin-bottom: 4px; }
+.hero p { margin: 0; color: var(--muted); }
+
+.figures { display: flex; gap: 40px; padding: 0 0 30px; border-bottom: 1px solid var(--line); margin-bottom: 28px; }
+.figure b { display: block; font: 700 24px/1.1 var(--rounded); font-variant-numeric: tabular-nums; }
+.figure span { color: var(--muted); font-size: 12.5px; }
+
+/* setup checklist */
+.setup { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 18px 20px 6px; margin-bottom: 30px; }
+.setup p { margin: -6px 0 10px; color: var(--muted); }
+
+/* rows shared by setup + settings */
+.row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.row:first-of-type { border-top: 0; }
+.row .label { flex: 1; min-width: 0; }
+.row .label b { display: block; font-weight: 550; }
+.row .label span { display: block; color: var(--muted); font-size: 12.5px; }
+.state { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.state.ok { color: var(--ok); }
+.state.bad { color: var(--danger); }
+
+/* history */
+.history-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.history-head h2 { margin: 0; }
+.history-tools { display: flex; align-items: center; gap: 6px; }
+.btn.armed { background: var(--danger); border-color: var(--danger); color: #fff; }
+.search {
+  width: 220px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); outline: none;
+}
+.search:focus { border-color: var(--accent); }
+.day { font-size: 12.5px; color: var(--muted); font-weight: 600; margin: 22px 0 4px; }
+.entry {
+  display: grid; grid-template-columns: 74px 1fr auto; gap: 14px;
+  padding: 11px 10px; margin: 0 -10px; border-radius: 10px;
+}
+.entry:hover { background: var(--surface); }
+.entry time { color: var(--faint); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; padding-top: 2px; }
+.entry .text { -webkit-user-select: text; user-select: text; cursor: text; white-space: pre-wrap; overflow-wrap: anywhere; }
+.entry .meta { color: var(--faint); font-size: 12px; margin-top: 3px; }
+.entry .raw { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); font-size: 13px; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
+.entry .tools { display: flex; gap: 4px; opacity: 0; transition: opacity .1s; align-self: start; }
+.entry:hover .tools, .entry:focus-within .tools { opacity: 1; }
+.empty { color: var(--muted); padding: 26px 0; }
+
+/* buttons + inputs */
+.btn {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+  padding: 5px 11px; font-size: 13px; font-weight: 500; white-space: nowrap;
+}
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.quiet { border-color: transparent; background: none; color: var(--muted); padding: 4px 8px; }
+.btn.quiet:hover { color: var(--ink); background: var(--accent-soft); }
+.btn.danger { color: var(--danger); }
+.btn[disabled] { opacity: .45; pointer-events: none; }
+.field {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); outline: none; min-width: 0;
+}
+.field:focus { border-color: var(--accent); }
+select.field { padding-right: 26px; }
+
+.toggle { position: relative; width: 38px; height: 22px; flex: none; }
+.toggle input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.toggle i { position: absolute; inset: 0; border-radius: 22px; background: var(--line); transition: background .15s; pointer-events: none; }
+.toggle i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.toggle input:checked + i { background: var(--accent); }
+.toggle input:checked + i::after { transform: translateX(16px); }
+.toggle input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle input:disabled + i { opacity: .45; }
+
+.segmented { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--line); }
+.segmented button { border: 0; background: none; padding: 4px 12px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.segmented button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+
+.section { margin-bottom: 34px; }
+.section .rows { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 2px 18px; }
+#claude-opts, #local-opts { border-top: 1px solid var(--line); }
+.sub { padding: 0 0 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sub .field { flex: 1; }
+.hint { color: var(--muted); font-size: 12.5px; }
+.hint code { font: 12px ui-monospace, Menlo, monospace; background: var(--accent-soft); padding: 1px 5px; border-radius: 5px; -webkit-user-select: text; user-select: text; }
+
+/* dictionary */
+.add { display: flex; gap: 8px; margin-bottom: 22px; }
+.add .field { flex: 1; font-size: 15px; padding: 9px 12px; }
+.words { display: flex; flex-wrap: wrap; gap: 8px; }
+.word {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 6px 5px 12px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); font-weight: 500;
+}
+.word button { border: 0; background: none; color: var(--faint); width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; padding: 0; }
+.word button:hover { color: var(--danger); background: var(--accent-soft); }
+
+/* shortcuts */
+.composer { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 16px 18px; margin-bottom: 26px; }
+.composer label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
+.composer .say { width: 100%; font-size: 15px; padding: 9px 12px; margin-bottom: 14px; }
+.composer textarea {
+  width: 100%; min-height: 76px; resize: vertical; padding: 9px 12px; font-size: 14px; line-height: 1.45;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--bg); outline: none;
+  -webkit-user-select: text; user-select: text;
+}
+.composer textarea:focus { border-color: var(--accent); }
+.composer .actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.composer .actions .hint { margin-right: auto; }
+.ideas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.ideas button { border: 1px dashed var(--faint); background: none; border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--muted); }
+.ideas button:hover { color: var(--ink); border-color: var(--accent); border-style: solid; }
+.snips { display: flex; flex-direction: column; }
+.snip {
+  display: grid; grid-template-columns: minmax(140px, 220px) 1fr auto; gap: 18px; align-items: start;
+  padding: 13px 10px; margin: 0 -10px; border-radius: 10px;
+  box-shadow: 0 -1px 0 var(--line);
+}
+.snip:first-child, .snip:hover, .snip:hover + .snip, .snip.editing, .snip.editing + .snip { box-shadow: none; }
+.snip:hover { background: var(--surface); }
+.snip .trigger { font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+.snip .trigger svg { width: 13px; height: 13px; flex: none; color: var(--accent); transform: translateY(1px); }
+.snip .expansion {
+  color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  -webkit-user-select: text; user-select: text;
+}
+.snip .tools { display: flex; gap: 4px; opacity: 0; transition: opacity .1s; }
+.snip:hover .tools, .snip:focus-within .tools { opacity: 1; }
+.snip.editing { background: var(--accent-soft); }
+
+/* toast */
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 12px);
+  background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px;
+  font-size: 13px; font-weight: 500; opacity: 0; pointer-events: none;
+  transition: opacity .15s, transform .15s;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.bad { background: var(--danger); color: #fff; }
+
+@media (max-width: 760px) {
+  .shell { grid-template-columns: 64px 1fr; }
+  .wordmark div { display: none; }
+  .nav button span, .engine span { display: none; }
+  .page { padding: 18px 22px 48px; }
+  .figures { gap: 24px; flex-wrap: wrap; }
+  .search { width: 150px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="wordmark" aria-label="Blah"><img src="{{LOGO}}" alt="" onerror="this.remove()"><div>blah<span>.</span></div></div>
+    <nav class="nav" aria-label="Sections">
+      <button data-page="home" aria-current="page">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 8h1.5M5 5v6M8 3v10M11 5.5v5M14 8h-.5"/></svg>
+        <span>Home</span>
+      </button>
+      <button data-page="dictionary">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3 2.5h8.5a1.5 1.5 0 0 1 1.5 1.5v9.5H4.5A1.5 1.5 0 0 1 3 12V2.5Z"/><path d="M3 12a1.5 1.5 0 0 1 1.5-1.5H13" /></svg>
+        <span>Dictionary</span>
+      </button>
+      <button data-page="shortcuts">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1.8 3.5 9h4L7 14.2 12.5 7h-4L9 1.8Z"/></svg>
+        <span>Shortcuts</span>
+      </button>
+      <button data-page="settings">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+    <div class="engine" id="engine"><i class="dot busy"></i><span>Starting</span></div>
+  </aside>
+
+  <main>
+    <!-- ============================================================ HOME -->
+    <section class="page" id="page-home">
+      <div class="hero">
+        <div class="keycap" id="keycap" aria-hidden="true"><span class="glyph" id="key-glyph">⌥</span><span class="side" id="key-side">right</span></div>
+        <div>
+          <h1 id="hero-title">Hold Right Option and talk.</h1>
+          <p>Let go and your words appear wherever you're typing. Tap once for hands-free, press Esc to cancel.</p>
+        </div>
+      </div>
+
+      <div class="figures" id="figures"></div>
+
+      <div class="setup" id="setup" hidden>
+        <h2>Finish setting up</h2>
+        <p>macOS needs your OK before Blah can hear you and type for you.</p>
+        <div id="setup-rows"></div>
+      </div>
+
+      <div class="history-head">
+        <h2>History</h2>
+        <div class="history-tools">
+          <input class="search" id="search" type="search" placeholder="Search history" aria-label="Search history">
+          <button class="btn quiet danger" id="clear-history-home" data-clear-history>Delete all</button>
+        </div>
+      </div>
+      <div id="history"></div>
+    </section>
+
+    <!-- ============================================================ DICTIONARY -->
+    <section class="page" id="page-dictionary" hidden>
+      <h1>Dictionary</h1>
+      <p class="lede">Names, brands and jargon Blah should spell your way. Whisper hears them better, and cleanup keeps them exactly as written.</p>
+      <form class="add" id="add-word">
+        <input class="field" id="new-word" placeholder="Add a word, like Kubernetes or Anya" aria-label="New word" autocomplete="off">
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+      <div class="words" id="words"></div>
+    </section>
+
+    <!-- ============================================================ SHORTCUTS -->
+    <section class="page" id="page-shortcuts" hidden>
+      <h1>Shortcuts</h1>
+      <p class="lede">Say a short phrase and Blah types the full text for you: your links, your email, a reply you send every day. It works on its own or in the middle of a sentence.</p>
+      <form class="composer" id="snip-form">
+        <label for="snip-say">When you say</label>
+        <input class="field say" id="snip-say" placeholder="My Instagram" autocomplete="off" maxlength="80">
+        <label for="snip-text">Blah types</label>
+        <textarea id="snip-text" placeholder="instagram.com/yourname" maxlength="10000"></textarea>
+        <div class="actions">
+          <span class="hint" id="snip-hint">Line breaks are kept, so longer replies work too.</span>
+          <button class="btn quiet" type="button" id="snip-cancel" hidden>Cancel</button>
+          <button class="btn primary" type="submit" id="snip-save">Add shortcut</button>
+        </div>
+      </form>
+      <div class="snips" id="snips"></div>
+    </section>
+
+    <!-- ============================================================ SETTINGS -->
+    <section class="page" id="page-settings" hidden>
+      <h1>Settings</h1>
+      <p class="lede">Changes apply right away.</p>
+
+      <div class="section">
+        <h2>Dictation</h2>
+        <div class="rows">
+          <div class="row">
+            <div class="label"><b>Shortcut</b><span>Hold to talk, or tap once for hands-free.</span></div>
+            <select class="field" id="set-hotkey" aria-label="Shortcut"></select>
+          </div>
+          <div class="row">
+            <div class="label"><b>Speed</b><span id="speed-note">How fast Blah turns your voice into text.</span></div>
+            <select class="field" id="set-speed" aria-label="Speed"></select>
+          </div>
+          <div class="row">
+            <div class="label"><b>Microphone</b><span>The one Blah listens to.</span></div>
+            <select class="field" id="set-mic" aria-label="Microphone" style="max-width: 240px"></select>
+          </div>
+          <div class="row">
+            <div class="label"><b>Language</b><span>Choosing one helps with short phrases.</span></div>
+            <select class="field" id="set-language" aria-label="Language"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Cleanup</h2>
+        <div class="rows">
+          <div class="row">
+            <div class="label"><b>Clean up text</b><span>Removes filler words, fixes punctuation, and applies corrections like "3, no wait, 4".</span></div>
+            <label class="toggle"><input type="checkbox" id="set-cleanup" aria-label="Clean up text"><i></i></label>
+          </div>
+          <div class="row" id="backend-row">
+            <div class="label"><b>Where cleanup runs</b><span id="backend-note"></span></div>
+            <div class="segmented" role="group" aria-label="Where cleanup runs">
+              <button type="button" data-backend="claude">Claude</button>
+              <button type="button" data-backend="local">On this Mac</button>
+            </div>
+          </div>
+          <div id="claude-opts">
+            <div class="row">
+              <div class="label"><b>Anthropic API key</b><span id="key-state">Not added yet.</span></div>
+              <button class="btn quiet danger" id="remove-key" hidden>Remove</button>
+            </div>
+            <form class="sub" id="key-form">
+              <input class="field" id="api-key" type="password" placeholder="sk-ant-…" aria-label="Anthropic API key" autocomplete="off">
+              <button class="btn primary" type="submit">Save key</button>
+            </form>
+          </div>
+          <div id="local-opts" hidden>
+            <div class="row">
+              <div class="label"><b>Model</b><span>Any model you've downloaded in Ollama.</span></div>
+              <input class="field" id="set-local-model" aria-label="Local model" style="width: 180px">
+            </div>
+            <div class="sub">
+              <span class="hint">Install Ollama from ollama.com, then run <code>ollama pull hermes3:8b</code> in Terminal.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>General</h2>
+        <div class="rows">
+          <div class="row">
+            <div class="label"><b>Sounds</b><span>A soft click when Blah starts and stops listening.</span></div>
+            <label class="toggle"><input type="checkbox" id="set-sounds" aria-label="Sounds"><i></i></label>
+          </div>
+          <div class="row">
+            <div class="label"><b>Keep my clipboard</b><span>Put back whatever you had copied after Blah pastes.</span></div>
+            <label class="toggle"><input type="checkbox" id="set-clipboard" aria-label="Keep my clipboard"><i></i></label>
+          </div>
+          <div class="row">
+            <div class="label"><b>Save history</b><span>Stored only on this Mac, in ~/.blah.</span></div>
+            <label class="toggle"><input type="checkbox" id="set-history" aria-label="Save history"><i></i></label>
+          </div>
+          <div class="row">
+            <div class="label"><b>Open at login</b><span id="login-note">Start Blah quietly in the menu bar when you log in.</span></div>
+            <label class="toggle"><input type="checkbox" id="set-login" aria-label="Open at login"><i></i></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Permissions</h2>
+        <div class="rows" id="perm-rows"></div>
+        <div class="sub" style="padding-top: 10px">
+          <span class="hint">Granted a permission but Blah still can't use it? Restart it.</span>
+          <button class="btn" id="restart">Restart Blah</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Advanced</h2>
+        <div class="rows">
+          <div class="row">
+            <div class="label"><b>Speech model</b><span id="model-info">Loading</span></div>
+            <button class="btn" id="open-file">Open settings file</button>
+          </div>
+          <div class="row">
+            <div class="label"><b>Clear history</b><span>Deletes every saved dictation. This can't be undone.</span></div>
+            <button class="btn danger" id="clear-history" data-clear-history>Clear history</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ------------------------------------------------------------------ bridge
+  const native = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.blah;
+  const pending = new Map();
+  let nextId = 1;
+
+  function call(cmd, args = {}) {
+    if (!native) return Promise.reject(new Error("Open Blah from your Applications folder."));
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      native.postMessage(JSON.stringify({ id, cmd, args }));
+    });
+  }
+
+  window.blah = {
+    reply(msg) {
+      const p = pending.get(msg.id);
+      if (!p) return;
+      pending.delete(msg.id);
+      msg.ok ? p.resolve(msg.result) : p.reject(new Error(msg.error));
+    },
+    receive(event) {
+      const d = event.data;
+      if (event.type === "status") { S.status = d; renderEngine(); renderKeycap(); }
+      if (event.type === "engine") { S.engine = d; renderEngine(); renderAdvanced(); }
+      if (event.type === "config") { S.config = d; renderAll(); }
+      if (event.type === "permissions") { S.permissions = d; renderPermissions(); }
+      if (event.type === "navigate") { go(d.page); }
+      if (event.type === "dictation") {
+        S.history.unshift(d);
+        S.stats = computeStats(S.history);
+        renderFigures(); renderHistory();
+      }
+    },
+  };
+
+  // ------------------------------------------------------------------ state
+  let S = null;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmt = (n) => Number(n || 0).toLocaleString();
+
+  function toast(message, bad = false) {
+    const t = $("toast");
+    t.textContent = message;
+    t.classList.toggle("bad", bad);
+    t.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => t.classList.remove("show"), bad ? 3200 : 1600);
+  }
+
+  async function set(changes, done) {
+    try {
+      S.config = await call("set", changes);
+      renderAll();
+      if (done) toast(done);
+    } catch (e) { toast(e.message, true); renderAll(); }
+  }
+
+  function computeStats(history) {
+    const weekAgo = Date.now() / 1000 - 7 * 86400;
+    let total = 0, week = 0, secs = 0;
+    for (const e of history) {
+      const w = (e.text || "").split(/\s+/).filter(Boolean).length;
+      total += w; secs += Number(e.seconds || 0);
+      if (Number(e.ts || 0) >= weekAgo) week += w;
+    }
+    return { words_total: total, words_week: week, wpm: secs > 5 ? Math.round(total / secs * 60) : null, count: history.length };
+  }
+
+  // ------------------------------------------------------------------ navigation
+  function go(page) {
+    for (const p of ["home", "dictionary", "shortcuts", "settings"]) {
+      $("page-" + p).hidden = p !== page;
+      document.querySelector(`.nav [data-page="${p}"]`).toggleAttribute("aria-current", p === page);
+      if (p === page) document.querySelector(`.nav [data-page="${p}"]`).setAttribute("aria-current", "page");
+    }
+    document.querySelector("main").scrollTop = 0;
+    if (page === "settings" || page === "home") refreshPermissions();
+  }
+  document.querySelectorAll(".nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
+
+  // ------------------------------------------------------------------ renderers
+  function hotkey() { return S.hotkeys.find((h) => h.id === S.config.hotkey) || S.hotkeys[0]; }
+
+  function renderKeycap() {
+    const h = hotkey();
+    $("key-glyph").textContent = h.glyph;
+    $("key-side").textContent = h.id.startsWith("left") ? "left" : h.id === "fn" ? "" : "right";
+    $("hero-title").textContent = `Hold ${h.label.replace(" (Globe)", "")} and talk.`;
+    const live = S.status && S.status.state === "recording";
+    $("keycap").classList.toggle("down", live);
+    $("keycap").classList.toggle("live", live);
+  }
+
+  function renderEngine() {
+    const st = S.status || {}, en = S.engine || {};
+    let cls = "busy", text = st.text || "Starting";
+    if (st.fatal || en.error) { cls = "bad"; text = st.fatal || "Speech model error"; }
+    else if (st.loading) { cls = "busy"; text = "Loading speech model"; }
+    else if (st.state === "recording") { cls = "busy"; text = "Listening"; }
+    else if (st.state === "processing") { cls = "busy"; text = "Working"; }
+    else { cls = "ok"; text = "Ready"; }
+    $("engine").innerHTML = `<i class="dot ${cls}"></i><span>${esc(text)}</span>`;
+  }
+
+  function renderFigures() {
+    const s = S.stats;
+    const items = [
+      [fmt(s.words_week), "words this week"],
+      [fmt(s.words_total), "words in total"],
+      [s.wpm ? fmt(s.wpm) : "—", "words per minute"],
+    ];
+    $("figures").innerHTML = items.map(([v, l]) => `<div class="figure"><b>${v}</b><span>${l}</span></div>`).join("");
+  }
+
+  const PERMS = [
+    ["microphone", "Microphone", "So Blah can hear you while you hold the key."],
+    ["input", "Input Monitoring", "So Blah notices your shortcut. It never records what you type."],
+    ["accessibility", "Accessibility", "So Blah can paste text into the app you're using."],
+  ];
+
+  function permRow([id, title, why]) {
+    const v = S.permissions[id];
+    const ok = v === "granted";
+    const state = ok ? `<span class="state ok">Allowed</span>`
+      : `<button class="btn primary" data-perm="${id}">Allow</button>`;
+    return `<div class="row"><div class="label"><b>${title}</b><span>${why}</span></div>${state}</div>`;
+  }
+
+  function renderPermissions() {
+    const html = PERMS.map(permRow).join("");
+    $("perm-rows").innerHTML = html;
+    const missing = PERMS.filter(([id]) => S.permissions[id] !== "granted");
+    $("setup").hidden = missing.length === 0;
+    $("setup-rows").innerHTML = missing.map(permRow).join("");
+  }
+
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-perm]");
+    if (!b) return;
+    await call("requestPermission", { which: b.dataset.perm });
+    toast("Turn on Blah in the window that opened");
+  });
+
+  async function refreshPermissions() {
+    if (!S) return;
+    try { S.permissions = await call("permissions"); renderPermissions(); } catch (_) {}
+  }
+  window.addEventListener("focus", refreshPermissions);
+
+  function dayLabel(d) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const that = new Date(d); that.setHours(0, 0, 0, 0);
+    const diff = Math.round((today - that) / 86400000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  }
+
+  function renderHistory() {
+    $("clear-history-home").hidden = !S.history.length;
+    const q = $("search").value.trim().toLowerCase();
+    const list = S.history.filter((e) => !q || (e.text || "").toLowerCase().includes(q) || (e.app || "").toLowerCase().includes(q));
+    if (!S.history.length) {
+      $("history").innerHTML = `<p class="empty">Nothing here yet. Click into any text field, hold ${esc(hotkey().glyph)} and say something.</p>`;
+      return;
+    }
+    if (!list.length) { $("history").innerHTML = `<p class="empty">No dictations match "${esc(q)}".</p>`; return; }
+    let html = "", lastDay = "";
+    for (const e of list) {
+      const d = e.ts ? new Date(e.ts * 1000) : new Date(e.time);
+      const label = dayLabel(d);
+      if (label !== lastDay) { html += `<div class="day">${esc(label)}</div>`; lastDay = label; }
+      const words = (e.text || "").split(/\s+/).filter(Boolean).length;
+      const meta = [e.app, `${words} ${words === 1 ? "word" : "words"}`,
+        (e.shortcuts || []).length ? `shortcut: ${e.shortcuts.join(", ")}` : ""].filter(Boolean).join(", ");
+      const showRaw = e.cleaned && e.raw && e.raw !== e.text;
+      html += `<div class="entry" data-id="${esc(e.id)}">
+        <time>${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</time>
+        <div><div class="text">${esc(e.text)}</div><div class="meta">${esc(meta)}</div>
+          ${showRaw ? `<details class="raw-wrap"><summary class="meta" style="cursor:pointer">What you said</summary><div class="raw">${esc(e.raw)}</div></details>` : ""}
+        </div>
+        <div class="tools">
+          <button class="btn quiet" data-act="copy">Copy</button>
+          <button class="btn quiet" data-act="delete" aria-label="Delete this dictation">Delete</button>
+        </div></div>`;
+    }
+    $("history").innerHTML = html;
+  }
+  $("search").addEventListener("input", renderHistory);
+
+  $("history").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-act]");
+    if (!b) return;
+    const id = b.closest(".entry").dataset.id;
+    const entry = S.history.find((x) => String(x.id) === id);
+    if (!entry) return;
+    if (b.dataset.act === "copy") { await call("copy", { text: entry.text }); toast("Copied"); }
+    if (b.dataset.act === "delete") {
+      if (!String(id).startsWith("unsaved-")) await call("deleteEntry", { id });
+      S.history = S.history.filter((x) => String(x.id) !== id);
+      S.stats = computeStats(S.history);
+      renderFigures(); renderHistory(); toast("Deleted");
+    }
+  });
+
+  // dictionary
+  function renderWords() {
+    const words = S.config.vocabulary || [];
+    $("words").innerHTML = words.length
+      ? words.map((w, i) => `<span class="word">${esc(w)}<button data-i="${i}" aria-label="Remove ${esc(w)}">×</button></span>`).join("")
+      : `<p class="empty" style="padding-top:0">No words yet.</p>`;
+  }
+  $("add-word").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const w = $("new-word").value.trim();
+    if (!w) return;
+    const words = S.config.vocabulary || [];
+    if (words.some((x) => x.toLowerCase() === w.toLowerCase())) { toast(`${w} is already in your dictionary`); return; }
+    $("new-word").value = "";
+    set({ vocabulary: [...words, w] }, `Added ${w}`);
+  });
+  $("words").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-i]");
+    if (!b) return;
+    const words = [...(S.config.vocabulary || [])];
+    const [gone] = words.splice(Number(b.dataset.i), 1);
+    set({ vocabulary: words }, `Removed ${gone}`);
+  });
+
+  // shortcuts
+  const MIC = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 8a5 5 0 0 0 10 0M8 13v1.5"/></svg>`;
+  const IDEAS = [["My Instagram", "instagram.com/"], ["My email", ""], ["My phone number", ""], ["Meeting link", "https://"], ["Client email", "Hi,\n\nThanks for reaching out. I'll get back to you within 24 hours.\n\nBest,\n"]];
+  const phrase = (t) => ((t || "").toLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu) || []).join(" ");
+  let editing = null;   // index being edited, or null
+
+  function renderSnippets() {
+    const list = S.config.snippets || [];
+    if (!list.length) {
+      $("snips").innerHTML = `<p class="empty" style="padding:4px 0 10px">No shortcuts yet. Some ideas to start with:</p>
+        <div class="ideas">${IDEAS.map(([t], i) => `<button type="button" data-idea="${i}">${esc(t)}</button>`).join("")}</div>`;
+      return;
+    }
+    $("snips").innerHTML = list.map((sn, i) => `
+      <div class="snip${editing === i ? " editing" : ""}" data-i="${i}">
+        <div class="trigger">${MIC}<span>${esc(sn.trigger)}</span></div>
+        <div class="expansion">${esc(sn.text)}</div>
+        <div class="tools">
+          <button class="btn quiet" data-snip="edit">Edit</button>
+          <button class="btn quiet" data-snip="delete" aria-label="Delete ${esc(sn.trigger)}">Delete</button>
+        </div>
+      </div>`).join("");
+  }
+
+  function resetComposer() {
+    editing = null;
+    $("snip-say").value = ""; $("snip-text").value = "";
+    $("snip-save").textContent = "Add shortcut";
+    $("snip-cancel").hidden = true;
+  }
+
+  $("snip-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const trigger = $("snip-say").value.trim().replace(/\s+/g, " ");
+    const text = $("snip-text").value.replace(/\s+$/, "");
+    if (!phrase(trigger)) { toast("Type the phrase you'll say", true); $("snip-say").focus(); return; }
+    if (!text.trim()) { toast("Type what Blah should type", true); $("snip-text").focus(); return; }
+    const list = [...(S.config.snippets || [])];
+    const clash = list.findIndex((sn, i) => i !== editing && phrase(sn.trigger) === phrase(trigger));
+    if (clash !== -1) { toast(`You already have a shortcut for "${list[clash].trigger}"`, true); return; }
+    const wasEditing = editing !== null;
+    if (wasEditing) list[editing] = { trigger, text }; else list.unshift({ trigger, text });
+    resetComposer();
+    await set({ snippets: list }, wasEditing ? "Shortcut saved" : `Added "${trigger}"`);
+  });
+
+  $("snip-cancel").addEventListener("click", () => { resetComposer(); renderSnippets(); });
+
+  $("snips").addEventListener("click", (e) => {
+    const idea = e.target.closest("[data-idea]");
+    if (idea) {
+      const [t, x] = IDEAS[Number(idea.dataset.idea)];
+      $("snip-say").value = t; $("snip-text").value = x;
+      $("snip-text").focus();
+      $("snip-text").setSelectionRange(x.length, x.length);
+      return;
+    }
+    const b = e.target.closest("[data-snip]");
+    if (!b) return;
+    const i = Number(b.closest(".snip").dataset.i);
+    const list = [...(S.config.snippets || [])];
+    if (b.dataset.snip === "edit") {
+      editing = i;
+      $("snip-say").value = list[i].trigger; $("snip-text").value = list[i].text;
+      $("snip-save").textContent = "Save changes";
+      $("snip-cancel").hidden = false;
+      renderSnippets();
+      document.querySelector("main").scrollTop = 0;
+      $("snip-text").focus();
+    } else {
+      const [gone] = list.splice(i, 1);
+      if (editing === i) resetComposer(); else if (editing !== null && editing > i) editing--;
+      set({ snippets: list }, `Deleted "${gone.trigger}"`);
+    }
+  });
+
+  // settings
+  function renderSettings() {
+    const c = S.config;
+    $("set-hotkey").innerHTML = S.hotkeys.map((h) => `<option value="${h.id}" ${h.id === c.hotkey ? "selected" : ""}>${esc(h.label)}</option>`).join("");
+    const models = S.speech_models || [];
+    const current = models.find((m) => m.id === c.mlx_model);
+    $("set-speed").innerHTML = models.map((m) => `<option value="${esc(m.id)}" ${m.id === c.mlx_model ? "selected" : ""}>${esc(m.label)}</option>`).join("")
+      + (current ? "" : `<option selected>Custom</option>`);
+    $("speed-note").textContent = current ? current.note + "." : "How fast Blah turns your voice into text.";
+    const mics = S.microphones || [];
+    const chosenMic = c.input_device || "";
+    const micOptions = [["", "System default"], ...mics.map((m) => [m, m])];
+    if (chosenMic && !mics.includes(chosenMic)) micOptions.push([chosenMic, `${chosenMic} (not connected)`]);
+    $("set-mic").innerHTML = micOptions.map(([v, l]) => `<option value="${esc(v)}" ${v === chosenMic ? "selected" : ""}>${esc(l)}</option>`).join("");
+    $("set-language").innerHTML = S.languages.map((l) => `<option value="${l.id ?? ""}" ${(l.id ?? null) === (c.language ?? null) ? "selected" : ""}>${esc(l.label)}</option>`).join("");
+    $("set-cleanup").checked = !!c.cleanup;
+    $("set-sounds").checked = !!c.sounds;
+    $("set-clipboard").checked = !!c.restore_clipboard;
+    $("set-history").checked = !!c.save_history;
+    $("set-login").checked = !!S.launch_at_login;
+    $("set-login").disabled = !S.can_launch_at_login;
+    if (!S.can_launch_at_login) $("login-note").textContent = "Available once Blah is installed with install.sh.";
+
+    const local = c.cleanup_backend === "local";
+    document.querySelectorAll("[data-backend]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.backend === c.cleanup_backend)));
+    $("backend-note").textContent = local
+      ? "A model on your Mac. Free, and nothing leaves your computer."
+      : "Claude Haiku. Only the text is sent, never your voice.";
+    $("claude-opts").hidden = local || !c.cleanup;
+    $("local-opts").hidden = !local || !c.cleanup;
+    $("backend-row").hidden = !c.cleanup;
+    $("key-state").textContent = c.has_api_key ? "Saved on this Mac. Usage draws from your Anthropic credits." : "Not added yet. Without a key, Blah pastes the raw transcript.";
+    $("remove-key").hidden = !c.has_api_key;
+    if (document.activeElement !== $("set-local-model")) $("set-local-model").value = c.local_model || "";
+  }
+
+  function renderAdvanced() {
+    const en = S.engine || {};
+    $("model-info").textContent = en.error ? `Couldn't load: ${en.error}` : en.ready ? `${en.model}, running on this Mac` : "Loading. The first launch downloads it (about 1.5 GB).";
+  }
+
+  $("set-hotkey").addEventListener("change", (e) => set({ hotkey: e.target.value }, "Shortcut changed"));
+  $("set-speed").addEventListener("change", (e) => set({ mlx_model: e.target.value }, "Switching speed. The first use downloads the model"));
+  $("set-mic").addEventListener("change", (e) => set({ input_device: e.target.value || null }, "Microphone changed"));
+  $("set-language").addEventListener("change", (e) => set({ language: e.target.value || null }, "Language changed"));
+  $("set-cleanup").addEventListener("change", (e) => set({ cleanup: e.target.checked }, e.target.checked ? "Cleanup on" : "Cleanup off"));
+  $("set-sounds").addEventListener("change", (e) => set({ sounds: e.target.checked }));
+  $("set-clipboard").addEventListener("change", (e) => set({ restore_clipboard: e.target.checked }));
+  $("set-history").addEventListener("change", (e) => set({ save_history: e.target.checked }, e.target.checked ? "History on" : "History off"));
+  $("set-local-model").addEventListener("change", (e) => { const v = e.target.value.trim(); if (v) set({ local_model: v }, "Model changed"); });
+  document.querySelectorAll("[data-backend]").forEach((b) => b.addEventListener("click", () => set({ cleanup_backend: b.dataset.backend })));
+  $("set-login").addEventListener("change", async (e) => {
+    try { S.launch_at_login = await call("setLaunchAtLogin", { on: e.target.checked }); toast(S.launch_at_login ? "Blah will open at login" : "Blah won't open at login"); }
+    catch (err) { toast(err.message, true); }
+    renderSettings();
+  });
+  $("key-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const key = $("api-key").value.trim();
+    if (!key) return;
+    try { S.config = await call("setApiKey", { key }); $("api-key").value = ""; renderSettings(); toast("Key saved"); }
+    catch (err) { toast(err.message, true); }
+  });
+  $("remove-key").addEventListener("click", async () => {
+    S.config = await call("setApiKey", { key: "" }); renderSettings(); toast("Key removed");
+  });
+  $("restart").addEventListener("click", () => call("restart"));
+  $("open-file").addEventListener("click", () => call("openSettingsFile"));
+  // Deleting everything takes two clicks: the first arms the button, the second deletes.
+  document.querySelectorAll("[data-clear-history]").forEach((b) => {
+    const label = b.textContent;
+    let timer = null;
+    b.addEventListener("click", async () => {
+      if (!b.classList.contains("armed")) {
+        if (!S.history.length) { toast("History is already empty"); return; }
+        b.classList.add("armed");
+        b.textContent = "Click again to delete all";
+        timer = setTimeout(() => { b.classList.remove("armed"); b.textContent = label; }, 4000);
+        return;
+      }
+      clearTimeout(timer);
+      b.classList.remove("armed"); b.textContent = label;
+      try {
+        await call("clearHistory");
+        S.history = []; S.stats = computeStats([]);
+        renderFigures(); renderHistory(); toast("All history deleted");
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+
+  function renderAll() {
+    renderKeycap(); renderEngine(); renderFigures(); renderPermissions();
+    renderHistory(); renderWords(); renderSnippets(); renderSettings(); renderAdvanced();
+  }
+
+  // ------------------------------------------------------------------ start
+  call("ready").then((snapshot) => {
+    S = snapshot;
+    S.stats = computeStats(S.history);
+    renderAll();
+    const start = new URLSearchParams(location.hash.slice(1)).get("page");
+    if (start) go(start);
+  });
+
+})();
+</script>
+</body>
+</html>
