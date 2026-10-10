@@ -11,6 +11,12 @@ SUPPORT="$HOME/Library/Application Support/Blah"
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "Blah runs on macOS only."; exit 1
 fi
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "Blah needs Apple's free developer tools first. Run:"
+  echo "    xcode-select --install"
+  echo "then run ./install.sh again."
+  exit 1
+fi
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 not found. Install it with:  xcode-select --install"; exit 1
 fi
@@ -46,7 +52,10 @@ echo "→ Installing dependencies (a few minutes the first time)"
 echo "→ Building $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-VERSION="$("$SUPPORT/venv/bin/python" -c 'import sys; sys.path.insert(0, sys.argv[1]); import blah; print(blah.__version__)' "$SUPPORT/src")"
+# The bundle version stays fixed: macOS ties permissions to the exact app bundle, so changing it
+# would make everyone re-allow Microphone, Input Monitoring and Accessibility on every update.
+# Blah's real version is shown in Settings › Advanced.
+VERSION="1.0.0"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

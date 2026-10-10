@@ -22,7 +22,7 @@
 - **History.** Search and copy everything you've dictated, and delete one entry or all of it. It's stored only on your Mac.
 - **Stays out of the way.** A small mouth icon in the menu bar opens while it listens, and a little pill shows a live waveform.
 - **Any microphone.** Pick your mic. If one goes silent, for example AirPods that disconnected, Blah switches to your Mac's built-in mic.
-- **Many languages.** Detects your language automatically, or you can set one.
+- **Many languages.** Detects your language automatically, or pick the ones you speak so short phrases never come out in the wrong language.
 
 ## Requirements
 
@@ -67,7 +67,7 @@ Then click **Restart Blah** in Settings.
 
 Everything else is in Blah's window:
 
-- **Settings:** shortcut key, speed, microphone, language, cleanup, sounds, open at login
+- **Settings:** shortcut key, speed, microphone, languages, cleanup, sounds, open at login
 - **Shortcuts:** phrases and the text Blah types for each
 - **Dictionary:** names and words Blah should spell your way
 
@@ -108,7 +108,8 @@ Dependencies come from PyPI and the speech model from Hugging Face, so a run of 
 | Works only inside Blah's window | Allow **Input Monitoring**, then **Restart Blah** |
 | Text lands on the clipboard instead of being typed | Allow **Accessibility** |
 | "Blah can't hear the microphone" | Pick your mic in **Settings › Microphone**, or allow **Microphone** in System Settings |
-| Too slow | **Settings › Speed › Fastest** |
+| Too slow | **Settings › Speed › Fastest**. Blah keeps working while the new model downloads |
+| Text in the wrong language | **Settings › Languages you speak**: add yours |
 | Anything else | Check `~/.blah/blah.log` and [open an issue](../../issues) |
 
 ## Update and uninstall

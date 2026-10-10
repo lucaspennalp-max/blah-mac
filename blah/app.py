@@ -37,7 +37,7 @@ from AppKit import (
 )
 from Foundation import NSURL, NSObject
 
-from . import core
+from . import __version__, core
 from .core import (
     CONFIG_PATH, HOTKEYS, KEYCODE_ESCAPE, LANGUAGES, LOCK_PATH, MIN_AUDIO_SECONDS,
     SAMPLE_RATE, SHOW_REQUEST_PATH, SILENCE_RMS, TAP_SECONDS, Cleaner, Transcriber, log,
@@ -323,11 +323,14 @@ class BlahController(NSObject):
             if event_type == Quartz.kCGEventFlagsChanged:
                 if keycode == self._hot_keycode:
                     is_down = bool(Quartz.CGEventGetFlags(event) & self._hot_mask)
+                    stamp = Quartz.CGEventGetTimestamp(event) / 1e9   # when it happened, in seconds
                     if is_down and not self._hotkey_down:
                         self._hotkey_down = True
+                        self._event_pressed_at = stamp
                         self._hotkey_pressed()
                     elif not is_down and self._hotkey_down:
                         self._hotkey_down = False
+                        self._event_held_for = stamp - getattr(self, "_event_pressed_at", stamp)
                         self._hotkey_released()
                 elif self._hotkey_down and self.state == "recording" and not self._hands_free:
                     self._cancel("")  # another modifier joined: it's a shortcut, not dictation
@@ -361,7 +364,10 @@ class BlahController(NSObject):
             return
         if self.state != "recording" or self._hands_free:
             return
-        if time.monotonic() - self._pressed_at < TAP_SECONDS:
+        held = getattr(self, "_event_held_for", None)
+        if held is None or held <= 0:
+            held = time.monotonic() - self._pressed_at
+        if held < TAP_SECONDS:
             self._hands_free = True
             self._set_status(f"Hands-free: tap {self._hot_label} to finish")
             return
@@ -495,6 +501,7 @@ class BlahController(NSObject):
                 text, shortcuts = core.expand_snippets(snippets, text)
 
             self.last_text = text
+            self._last_dictation = time.monotonic()
             elapsed = time.monotonic() - started
             if core.accessibility_granted() is False:
                 # macOS won't let Blah paste yet: keep the words on the clipboard instead.
@@ -525,7 +532,8 @@ class BlahController(NSObject):
     @objc.python_method
     def _load_model(self):
         try:
-            self.transcriber.load()
+            self.transcriber.load(progress=lambda f: self._set_status(
+                f"Downloading the speech model… {int(f * 100)}%"))
             self._set_status("Ready")
         except Exception as exc:  # noqa: BLE001
             self.transcriber.error = str(exc)
@@ -534,6 +542,9 @@ class BlahController(NSObject):
         finally:
             self.model_ready.set()
             self._events.append(("engine", self._engine_info()))
+            if (not self.transcriber.error and self.transcriber.engine == "mlx"
+                    and self.cfg.get("mlx_model") != self.transcriber.repo):
+                self._switch_model(self.cfg["mlx_model"])
 
     # ------------------------------------------------------------------ status
 
@@ -558,12 +569,14 @@ class BlahController(NSObject):
     @objc.python_method
     def _status_info(self):
         return {"state": self.state, "text": self.fatal or self.status_text,
-                "loading": not self.model_ready.is_set(), "fatal": self.fatal}
+                "loading": not self.model_ready.is_set(), "fatal": self.fatal,
+                "switching": getattr(self, "switching", None)}
 
     @objc.python_method
     def _engine_info(self):
         return {"ready": self.model_ready.is_set() and not self.transcriber.error,
                 "model": self.transcriber.description, "error": self.transcriber.error,
+                "repo": self.transcriber.repo, "engine": self.transcriber.engine,
                 "machine": platform.machine()}
 
     # ------------------------------------------------------------------ main-thread tick
@@ -641,6 +654,14 @@ class BlahController(NSObject):
             self._devices_refreshed = now
             refresh_audio_devices()
 
+        # After a few idle minutes macOS moves the model out of fast memory, which made the next
+        # dictation take 8 s instead of 2 s. While you're actively using Blah, keep it warm.
+        last_used = getattr(self, "_last_dictation", None)
+        if (last_used is not None and self.state == "idle" and self.model_ready.is_set()
+                and not getattr(self, "switching", None) and now - last_used < 3600 and now - getattr(self, "_last_warm", 0.0) > 240):
+            self._last_warm = now
+            threading.Thread(target=self.transcriber.keep_warm, daemon=True).start()
+
         if getattr(self, "_restart_soon", False) and self.state == "idle":
             self._restart_soon = False
             self._restart()
@@ -706,14 +727,52 @@ class BlahController(NSObject):
             "permissions": self._permissions(),
             "launch_at_login": core.launch_at_login_enabled(),
             "can_launch_at_login": bool(core.app_bundle_path()),
+            "version": __version__,
         }
 
     @objc.python_method
-    def _reload_model(self):
-        self.model_ready.clear()
-        self.transcriber = Transcriber(self.cfg)
-        self._set_status("Loading the new speech model")
-        threading.Thread(target=self._load_model, daemon=True).start()
+    def _model_label(self, repo):
+        return next((label for r, label, _ in core.SPEECH_MODELS.values() if r == repo), "new")
+
+    @objc.python_method
+    def _switch_model(self, repo):
+        """Download and switch to another speech model while the current one keeps working."""
+        if self.transcriber.engine != "mlx":
+            return                         # Intel Macs use a different engine; speed options don't apply
+        label = self._model_label(repo)
+        self.switching = label
+
+        def current():
+            return self.transcriber._wanted == repo     # a newer choice replaces this one
+
+        def progress(fraction):
+            if current():
+                self._set_status(f"Downloading the {label} model… {int(fraction * 100)}%")
+
+        def run():
+            try:
+                self.transcriber.switch_to(repo, progress=progress)
+                if current() and self.transcriber.repo == repo:
+                    self.switching = None
+                    self.transcriber.error = None       # a working model fixes an earlier failed load
+                    self.fatal = None
+                    self._set_status(f"Ready · {label}")
+                    self._notify(f"Switched to {label}")
+            except Exception as exc:  # noqa: BLE001
+                log(f"Couldn't switch to {repo}: {exc}")
+                if current():
+                    self.switching = None
+                    working = self.transcriber.repo
+                    if working:                             # stay on the model that works
+                        self.cfg["mlx_model"] = working
+                        core.save_config(self.cfg)
+                        self._events.append(("config", core.public_config(self.cfg)))
+                    self._flag_error(f"Couldn't download the {label} model. Check your internet connection.")
+            finally:
+                self._events.append(("engine", self._engine_info()))
+                self._events.append(("status", self._status_info()))
+
+        threading.Thread(target=run, daemon=True).start()
 
     @objc.python_method
     def _update_settings(self, changes):
@@ -725,8 +784,8 @@ class BlahController(NSObject):
         self.cfg.update(changes)
         core.save_config(self.cfg)
         self.cleaner.reset()
-        if model_changed and self.state == "idle":
-            self._reload_model()
+        if model_changed and self.model_ready.is_set():
+            self._switch_model(changes["mlx_model"])
         self._apply_hotkey()
         self._refresh_menu()
 

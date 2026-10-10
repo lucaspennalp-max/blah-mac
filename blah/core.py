@@ -10,6 +10,7 @@ import platform
 import re
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -31,7 +32,7 @@ DEFAULT_CONFIG = {
     "engine": "auto",
     "mlx_model": "mlx-community/whisper-large-v3-turbo-q4",
     "faster_whisper_model": "small",
-    "language": None,
+    "languages": [],                      # [] = detect any language; ["en"] = always English; several = pick among them
     "vocabulary": [],
     "snippets": [],                       # [{"trigger": "my instagram", "text": "instagram.com/…"}]
     "cleanup": True,
@@ -58,7 +59,7 @@ EDITABLE = {
     "hotkey": lambda v: v in HOTKEYS,
     "mlx_model": lambda v: v in {m[0] for m in SPEECH_MODELS.values()},
     "input_device": lambda v: v is None or (isinstance(v, str) and 0 < len(v) < 200),
-    "language": lambda v: v is None or (isinstance(v, str) and 1 <= len(v) <= 5),
+    "languages": lambda v: isinstance(v, list) and len(v) <= 8 and all(x in LANGUAGE_CODES for x in v),
     "vocabulary": lambda v: isinstance(v, list) and all(isinstance(w, str) for w in v) and len(v) <= 500,
     "snippets": lambda v: isinstance(v, list) and len(v) <= 300 and all(
         isinstance(x, dict) and set(x) <= {"trigger", "text"}
@@ -91,6 +92,7 @@ LANGUAGES = [
     ("pt", "Portuguese"), ("nl", "Dutch"), ("uk", "Ukrainian"), ("pl", "Polish"),
     ("tr", "Turkish"), ("zh", "Chinese"), ("ja", "Japanese"), ("ko", "Korean"),
 ]
+LANGUAGE_CODES = {code for code, _ in LANGUAGES if code}
 
 CLEANUP_PROMPT = """You are a dictation cleanup engine. You receive a raw speech-to-text transcript and return the text the speaker intended to type.
 
@@ -121,18 +123,29 @@ def load_config():
             return cfg
     if cfg.get("hotkey") not in HOTKEYS:
         cfg["hotkey"] = "right_option"
+    if not isinstance(cfg.get("mlx_model"), str) or not cfg["mlx_model"]:
+        cfg["mlx_model"] = DEFAULT_CONFIG["mlx_model"]
+    if "language" in cfg:                 # older versions had a single language
+        old = cfg.pop("language")
+        if old and not cfg.get("languages"):
+            cfg["languages"] = [old] if old in LANGUAGE_CODES else []
     save_config(cfg)
     return cfg
 
 
+_CONFIG_LOCK = threading.Lock()
+_HISTORY_LOCK = threading.Lock()
+_PASTE_LOCK = threading.Lock()
+
+
 def save_config(cfg):
-    DATA_DIR.mkdir(mode=0o700, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # the file can hold your API key
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
-    os.chmod(tmp, 0o600)
-    tmp.replace(CONFIG_PATH)
+    import tempfile
+    with _CONFIG_LOCK:                     # the window and the dictation thread can both save
+        DATA_DIR.mkdir(mode=0o700, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix="config.", suffix=".tmp", dir=DATA_DIR)  # created 0600
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+        os.replace(tmp, CONFIG_PATH)
 
 
 def public_config(cfg):
@@ -163,6 +176,11 @@ def load_history(limit=400):
 
 
 def append_history(entry):
+    with _HISTORY_LOCK:
+        return _append_history(entry)
+
+
+def _append_history(entry):
     entry = dict(entry, id=uuid.uuid4().hex)
     fd = os.open(HISTORY_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)   # private from the start
     with os.fdopen(fd, "a", encoding="utf-8") as fh:
@@ -171,6 +189,11 @@ def append_history(entry):
 
 
 def delete_history(entry_id=None):
+    with _HISTORY_LOCK:
+        _delete_history(entry_id)
+
+
+def _delete_history(entry_id=None):
     """Delete one entry by id, or everything when entry_id is None."""
     if entry_id is None:
         HISTORY_PATH.unlink(missing_ok=True)
@@ -252,19 +275,26 @@ def play_sound(cfg, name):
 # --------------------------------------------------------------------------- speech-to-text
 
 class Transcriber:
-    """Local Whisper: mlx-whisper on Apple Silicon, faster-whisper elsewhere."""
+    """Local Whisper: mlx-whisper on Apple Silicon, faster-whisper elsewhere.
+
+    The speech engine keeps one model in memory. Switching models downloads the new one
+    first (with progress) while the current one keeps working, then swaps under a lock.
+    """
 
     def __init__(self, cfg):
         self.cfg = cfg
         self.engine = None
+        self.repo = None                  # the model actually in use
         self.description = ""
         self.error = None
         self._mlx = None
         self._model = None
+        self._lock = threading.Lock()     # the engine isn't safe to use from two threads at once
+        self._wanted = None               # the model the person most recently asked for
 
-    def load(self):
-        import numpy as np
+    # -- loading ---------------------------------------------------------------------
 
+    def load(self, progress=None):
         wanted = self.cfg.get("engine", "auto")
         if wanted in ("auto", "mlx") and platform.machine() == "arm64":
             try:
@@ -275,37 +305,127 @@ class Transcriber:
             else:
                 self._mlx = mlx_whisper
                 self.engine = "mlx"
-                repo = self.cfg["mlx_model"]
-                # Warm-up: downloads the model on first run and compiles kernels.
-                mlx_whisper.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), path_or_hf_repo=repo)
-                self.description = repo.split("/")[-1]
+                self.switch_to(self.cfg["mlx_model"], progress)
                 return
 
         from faster_whisper import WhisperModel
         name = self.cfg["faster_whisper_model"]
         self._model = WhisperModel(name, device="cpu", compute_type="int8")
         self.engine = "faster-whisper"
+        self.repo = name
         self.description = "whisper-" + name
+
+    def switch_to(self, repo, progress=None):
+        """Download (if needed) and start using another speech model. Returns False if a newer
+        request replaced this one while it was downloading."""
+        import numpy as np
+        self._wanted = repo
+        download_model(repo, progress)
+        if self._wanted != repo:
+            return False
+        with self._lock:
+            if self._wanted != repo:
+                return False
+            # Loads the model into memory and compiles it, so the first dictation is quick.
+            self._mlx.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32), path_or_hf_repo=repo,
+                                 temperature=0.0)
+            self.repo = repo
+            self.description = repo.split("/")[-1]
+        return True
+
+    def keep_warm(self):
+        """Run a tiny bit of silence through the model so macOS keeps it in fast memory."""
+        import numpy as np
+        if self.engine != "mlx" or not self._lock.acquire(blocking=False):
+            return
+        try:
+            self._mlx.transcribe(np.zeros(SAMPLE_RATE // 4, dtype=np.float32), path_or_hf_repo=self.repo,
+                                 temperature=0.0)
+        finally:
+            self._lock.release()
+
+    # -- transcribing ----------------------------------------------------------------
 
     def transcribe(self, audio):
         vocab = self.cfg.get("vocabulary") or []
         prompt = ", ".join(vocab) if vocab else None
-        language = self.cfg.get("language") or None
+        languages = [code for code in (self.cfg.get("languages") or []) if code in LANGUAGE_CODES]
+        fixed = languages[0] if len(languages) == 1 else None
+        with self._lock:
+            text, detected = self._run(audio, fixed, prompt)
+            if len(languages) > 1 and detected and detected not in languages:
+                # Short clips sometimes get detected as a language you don't speak.
+                # Re-run in the most likely of *your* languages.
+                choice = self._likeliest(audio, languages)
+                log(f"Detected '{detected}', which isn't one of your languages; using '{choice}'.")
+                text, _ = self._run(audio, choice, prompt)
+        return text
+
+    def _run(self, audio, language, prompt):
         if self.engine == "mlx":
             result = self._mlx.transcribe(
-                audio,
-                path_or_hf_repo=self.cfg["mlx_model"],
-                language=language,
-                initial_prompt=prompt,
+                audio, path_or_hf_repo=self.repo, language=language, initial_prompt=prompt,
                 condition_on_previous_text=False,
                 temperature=0.0,          # one pass; don't re-decode up to 5 more times when unsure
             )
-            return result.get("text", "").strip()
-        segments, _info = self._model.transcribe(
+            return result.get("text", "").strip(), result.get("language")
+        segments, info = self._model.transcribe(
             audio, language=language, initial_prompt=prompt, vad_filter=True,
             temperature=0.0, beam_size=1,
         )
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        return " ".join(seg.text.strip() for seg in segments).strip(), getattr(info, "language", None)
+
+    def _likeliest(self, audio, languages):
+        try:
+            if self.engine == "mlx":
+                import mlx.core as mx
+                from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
+                from mlx_whisper.transcribe import ModelHolder
+                model = ModelHolder.get_model(self.repo, mx.float16)
+                mel = log_mel_spectrogram(audio, n_mels=model.dims.n_mels, padding=N_SAMPLES)
+                _, probs = model.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
+                probs = probs[0] if isinstance(probs, list) else probs
+            else:
+                _, _, all_probs = self._model.detect_language(audio)
+                probs = dict(all_probs)
+            return max(languages, key=lambda code: probs.get(code, 0.0))
+        except Exception as exc:  # noqa: BLE001
+            log(f"Couldn't rank languages ({exc}); using {languages[0]}.")
+            return languages[0]
+
+
+def download_model(repo, progress=None):
+    """Fetch a speech model from Hugging Face into the local cache, reporting 0..1 progress."""
+    from huggingface_hub import HfApi, snapshot_download
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    folder = Path(HF_HUB_CACHE) / ("models--" + repo.replace("/", "--"))
+    total = 0
+    if progress is not None:
+        try:
+            info = HfApi().model_info(repo, files_metadata=True)
+            total = sum((f.size or 0) for f in info.siblings)
+        except Exception:  # noqa: BLE001
+            total = 0                     # offline or unknown size: download without a percentage
+
+    done = threading.Event()
+
+    def report():
+        while not done.wait(0.5):
+            have = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file() and not f.is_symlink()) \
+                if folder.exists() else 0
+            progress(min(0.99, have / total))
+
+    watcher = None
+    if progress is not None and total:
+        watcher = threading.Thread(target=report, daemon=True)
+        watcher.start()
+    try:
+        snapshot_download(repo_id=repo)
+    finally:
+        done.set()
+        if watcher is not None:
+            watcher.join(timeout=1)
 
 
 # --------------------------------------------------------------------------- cleanup
@@ -438,6 +558,11 @@ def set_clipboard_text(text, transient=False):
 
 
 def paste_text(text, restore_clipboard=True):
+    with _PASTE_LOCK:                      # two overlapping pastes would lose your real clipboard
+        _paste_text(text, restore_clipboard)
+
+
+def _paste_text(text, restore_clipboard=True):
     import Quartz
     from AppKit import NSPasteboard
 
